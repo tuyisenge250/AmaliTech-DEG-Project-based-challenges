@@ -77,10 +77,15 @@ sequenceDiagram
 
 ```
 app/
-  main.py    FastAPI app, request validation, idempotency flow, simulated processor
-  store.py   In-memory idempotency store with TTL expiry
+  main.py      FastAPI app, request validation, idempotency flow, simulated processor
+  store.py     In-memory idempotency store with TTL expiry
+docs/
+  openapi.json Exported OpenAPI (Swagger) spec
+scripts/
+  export_openapi.py
 tests/
-  test_api.py
+  test_api.py  Behaviour of the endpoint
+  test_docs.py Swagger/OpenAPI output
 ```
 
 ---
@@ -99,7 +104,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --port 8000
 ```
 
-The server is now on `http://localhost:8000`. Interactive Swagger docs are at `http://localhost:8000/docs`.
+The server is now on `http://localhost:8000`. Interactive Swagger docs are at `http://localhost:8000/docs` (see [Interactive docs](#interactive-docs-swagger)).
 
 ### Configuration (optional environment variables)
 
@@ -133,6 +138,27 @@ curl -i -X POST http://localhost:8000/process-payment \
 ---
 
 ## 3. API documentation
+
+### Interactive docs (Swagger)
+
+With the server running:
+
+| URL                                  | What it is                                              |
+| ------------------------------------ | ------------------------------------------------------- |
+| `http://localhost:8000/docs`         | Swagger UI. Try requests from the browser.              |
+| `http://localhost:8000/redoc`        | ReDoc, a read-only view of the same spec.               |
+| `http://localhost:8000/openapi.json` | The raw OpenAPI spec.                                   |
+| [`docs/openapi.json`](docs/openapi.json) | A committed copy, readable without running the server. You can paste it into [editor.swagger.io](https://editor.swagger.io). |
+
+In Swagger UI, open **POST /process-payment**, click **Try it out**, and use **Execute** twice with the same `Idempotency-Key`. The request duration shown under each response makes the difference obvious: about 2 s the first time, a few ms on the replay, with `x-cache-hit: true`.
+
+The spec documents every outcome (`201`, `400`, `422` for both key reuse and validation errors, `500`), the `X-Cache-Hit` response header, and examples for each.
+
+If you change the API, regenerate the committed copy. A test fails if it is out of date:
+
+```bash
+python -m scripts.export_openapi
+```
 
 ### `POST /process-payment`
 

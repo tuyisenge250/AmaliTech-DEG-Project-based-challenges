@@ -1,0 +1,272 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Idempotency Gateway",
+    "summary": "Process each payment exactly once.",
+    "description": "\nA **pay-once** layer for FinSafe Transactions Ltd. Send a payment with an\n`Idempotency-Key` header and it is processed **exactly once**, however many times\nthe client retries.\n\n| Situation | Result |\n| --- | --- |\n| First request for a key | Payment is processed (about 2 s) and the response is saved. `X-Cache-Hit: false` |\n| Same key, same body | Saved response is returned instantly. `X-Cache-Hit: true` |\n| Same key, same body, **while the first is still processing** | Waits for the first request, then returns its response. `X-Cache-Hit: true` |\n| Same key, **different** body | `422` with an error message |\n\nKeys are remembered for 24 hours by default (`IDEMPOTENCY_KEY_TTL_SECONDS`).\n",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/process-payment": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Process a payment (idempotent)",
+        "description": "Charges the given amount **once** per `Idempotency-Key`.\n\nRetry safely with the same key and body: the saved response is returned with `X-Cache-Hit: true` and no second charge is made. A retry that arrives while the first request is still processing waits for it and returns the same result.\n\nUsing the same key with a different body is rejected with `422`.",
+        "operationId": "processPayment",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Unique string for this payment, chosen by the client (max 255 characters). Reuse it when retrying.",
+              "examples": [
+                "order-1001"
+              ],
+              "title": "Idempotency-Key"
+            },
+            "description": "Unique string for this payment, chosen by the client (max 255 characters). Reuse it when retrying."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Payment processed. On a duplicate request this is an exact copy of the first response, with `X-Cache-Hit: true`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Cache-Hit": {
+                "description": "`false` when this request ran the payment, `true` when the saved response was replayed.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`Idempotency-Key` header is missing, blank or longer than 255 characters.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "missing": {
+                    "summary": "Header missing",
+                    "value": {
+                      "error": "Idempotency-Key header is required."
+                    }
+                  },
+                  "too_long": {
+                    "summary": "Key too long",
+                    "value": {
+                      "error": "Idempotency-Key must be at most 255 characters."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Either the key was already used with a different request body, or the body failed validation.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "key_reuse": {
+                    "summary": "Same key, different body",
+                    "value": {
+                      "error": "Idempotency key already used for a different request body."
+                    }
+                  },
+                  "invalid_body": {
+                    "summary": "Body failed validation",
+                    "value": {
+                      "detail": [
+                        {
+                          "type": "greater_than",
+                          "loc": [
+                            "body",
+                            "amount"
+                          ],
+                          "msg": "Input should be greater than 0"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Processpayment"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The charge itself failed. The key is released, so the client may retry with the same `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Payment processing failed. Retry with the same Idempotency-Key."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse"
+      },
+      "PaymentRequest": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Amount",
+            "description": "Amount to charge. Greater than 0, at most 2 decimal places.",
+            "examples": [
+              100
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{3}$",
+            "title": "Currency",
+            "description": "3-letter currency code. Case-insensitive, stored upper-case.",
+            "examples": [
+              "GHS"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "PaymentRequest",
+        "examples": [
+          {
+            "amount": 100,
+            "currency": "GHS"
+          }
+        ]
+      },
+      "PaymentResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "examples": [
+              "Charged 100 GHS"
+            ]
+          },
+          "transaction_id": {
+            "type": "string",
+            "title": "Transaction Id",
+            "description": "Generated once per processed payment. A replay returns the same id.",
+            "examples": [
+              "e87f0e2e-39bc-48b8-9b4e-8fd7bafb1373"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount",
+            "examples": [
+              "100"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "GHS"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "transaction_id",
+          "amount",
+          "currency"
+        ],
+        "title": "PaymentResponse"
+      },
+      "ValidationErrorResponse": {
+        "properties": {
+          "detail": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ValidationErrorResponse"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Payments",
+      "description": "Idempotent payment processing."
+    }
+  ]
+}
