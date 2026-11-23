@@ -1,10 +1,11 @@
 """Request and response models."""
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StrictFloat, StrictInt
 
-from .monitors import Status
+from .monitors import Monitor, Status
 
 MAX_TIMEOUT_SECONDS = 604_800  # 7 days
 ID_PATTERN = r"^[A-Za-z0-9._-]{1,64}$"
@@ -46,6 +47,55 @@ class MonitorAck(BaseModel):
     message: str
     id: str = Field(examples=["device-123"])
     status: Status
+
+
+class MonitorOut(BaseModel):
+    """Current state of a monitor."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "device-123",
+                    "status": "active",
+                    "timeout": 60,
+                    "alert_email": "admin@critmon.com",
+                    "seconds_remaining": 41.3,
+                    "created_at": "2026-01-01T08:00:00+00:00",
+                    "last_heartbeat_at": "2026-01-01T08:00:19+00:00",
+                    "last_alert_at": None,
+                }
+            ]
+        }
+    )
+
+    id: str
+    status: Status
+    timeout: float = Field(description="Seconds allowed between heartbeats.")
+    alert_email: str
+    seconds_remaining: float | None = Field(
+        description="Time left before the alert fires. Null when paused or down."
+    )
+    created_at: datetime
+    last_heartbeat_at: datetime | None = Field(
+        description="Null until the first heartbeat is received."
+    )
+    last_alert_at: datetime | None = Field(
+        description="When the most recent alert fired. Null if it never has."
+    )
+
+    @classmethod
+    def from_monitor(cls, monitor: Monitor, seconds_remaining: float | None) -> "MonitorOut":
+        return cls(
+            id=monitor.id,
+            status=monitor.status,
+            timeout=monitor.timeout,
+            alert_email=monitor.alert_email,
+            seconds_remaining=None if seconds_remaining is None else round(seconds_remaining, 1),
+            created_at=monitor.created_at,
+            last_heartbeat_at=monitor.last_heartbeat_at,
+            last_alert_at=monitor.last_alert_at,
+        )
 
 
 class ErrorResponse(BaseModel):

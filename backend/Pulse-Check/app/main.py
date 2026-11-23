@@ -6,13 +6,13 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI, Path, Request
+from fastapi import FastAPI, Path, Query, Request
 from fastapi.responses import JSONResponse
 
 from . import docs
 from .alerts import log_alert
 from .monitors import Monitor, MonitorAlreadyExists, MonitorNotFound, MonitorService, Status
-from .schemas import MonitorAck, MonitorCreate
+from .schemas import MonitorAck, MonitorCreate, MonitorOut
 
 MonitorId = Annotated[
     str, Path(description="Id the monitor was registered with.", examples=["device-123"])
@@ -113,6 +113,48 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
             id=monitor.id,
             status=monitor.status,
         )
+
+    # --- Developer's Choice: see what the system knows ----------------------------
+
+    def view(monitor: Monitor) -> MonitorOut:
+        return MonitorOut.from_monitor(monitor, service.seconds_remaining(monitor))
+
+    @app.get(
+        "/monitors",
+        summary="List monitors",
+        description=(
+            "Returns every monitor. Use `?status=down` to see only the devices "
+            "that have stopped sending heartbeats."
+        ),
+    )
+    async def list_monitors(
+        status: Annotated[
+            Status | None, Query(description="Only return monitors in this status.")
+        ] = None,
+    ) -> list[MonitorOut]:
+        return [view(m) for m in service.list_monitors(status)]
+
+    @app.get(
+        "/monitors/{monitor_id}",
+        summary="Get a monitor",
+        description="Current status, time left on the countdown and last activity.",
+        responses=docs.GET_RESPONSES,
+    )
+    async def get_monitor(monitor_id: MonitorId) -> MonitorOut:
+        return view(service.get(monitor_id))
+
+    @app.delete(
+        "/monitors/{monitor_id}",
+        status_code=204,
+        summary="Delete a monitor",
+        description=(
+            "Stops monitoring and forgets the device, for example when it is "
+            "decommissioned. The id can be registered again afterwards."
+        ),
+        responses=docs.DELETE_RESPONSES,
+    )
+    async def delete_monitor(monitor_id: MonitorId) -> None:
+        service.delete(monitor_id)
 
     return app
 
