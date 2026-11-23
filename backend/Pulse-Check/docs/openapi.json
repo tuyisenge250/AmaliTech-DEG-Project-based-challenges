@@ -1,0 +1,647 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pulse-Check API",
+    "summary": "Get alerted when a device stops talking.",
+    "description": "\nA **dead man's switch** for remote devices (CritMon Servers Inc.). Each device\nregisters a monitor with a countdown. As long as it keeps sending heartbeats the\ncountdown keeps resetting. If it goes quiet, an alert fires.\n\n| Status | Meaning | How it changes |\n| --- | --- | --- |\n| `active` | Countdown running | Heartbeat resets it. Reaching zero makes it `down`. |\n| `paused` | Countdown stopped, no alerts | `pause` sets it. Any heartbeat makes it `active` again. |\n| `down` | Countdown ran out, alert fired | A heartbeat makes it `active` again. |\n\nThe alert is written to the server console as one JSON line:\n`{\"ALERT\": \"Device device-123 is down!\", \"time\": \"...\", \"alert_email\": \"...\"}`.\n",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/monitors": {
+      "post": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Register a monitor",
+        "description": "Creates a monitor and starts its countdown. If no heartbeat arrives within `timeout` seconds, an alert fires and the monitor goes `down`.",
+        "operationId": "register_monitor_monitors_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitorCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorAck"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A monitor with this id already exists.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Monitor 'device-123' already exists."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body failed validation.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "greater_than",
+                      "loc": [
+                        "body",
+                        "timeout"
+                      ],
+                      "msg": "Input should be greater than 0"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Visibility"
+        ],
+        "summary": "List monitors",
+        "description": "Returns every monitor. Use `?status=down` to see only the devices that have stopped sending heartbeats.",
+        "operationId": "list_monitors_monitors_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Status"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only return monitors in this status.",
+              "title": "Status"
+            },
+            "description": "Only return monitors in this status."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MonitorOut"
+                  },
+                  "title": "Response List Monitors Monitors Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitors/{monitor_id}/heartbeat": {
+      "post": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Send a heartbeat",
+        "description": "Resets the countdown to the full timeout. Also resumes a paused monitor and brings a `down` monitor back to `active`.",
+        "operationId": "heartbeat_monitors__monitor_id__heartbeat_post",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Id the monitor was registered with.",
+              "examples": [
+                "device-123"
+              ],
+              "title": "Monitor Id"
+            },
+            "description": "Id the monitor was registered with."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorAck"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No monitor with this id.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Monitor 'device-123' not found."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitors/{monitor_id}/pause": {
+      "post": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Pause a monitor",
+        "description": "Stops the countdown so no alert fires, for example while a device is being repaired. The next heartbeat resumes monitoring.",
+        "operationId": "pause_monitors__monitor_id__pause_post",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Id the monitor was registered with.",
+              "examples": [
+                "device-123"
+              ],
+              "title": "Monitor Id"
+            },
+            "description": "Id the monitor was registered with."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorAck"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No monitor with this id.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Monitor 'device-123' not found."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitors/{monitor_id}": {
+      "get": {
+        "tags": [
+          "Visibility"
+        ],
+        "summary": "Get a monitor",
+        "description": "Current status, time left on the countdown and last activity.",
+        "operationId": "get_monitor_monitors__monitor_id__get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Id the monitor was registered with.",
+              "examples": [
+                "device-123"
+              ],
+              "title": "Monitor Id"
+            },
+            "description": "Id the monitor was registered with."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No monitor with this id.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Monitor 'device-123' not found."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Visibility"
+        ],
+        "summary": "Delete a monitor",
+        "description": "Stops monitoring and forgets the device, for example when it is decommissioned. The id can be registered again afterwards.",
+        "operationId": "delete_monitor_monitors__monitor_id__delete",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Id the monitor was registered with.",
+              "examples": [
+                "device-123"
+              ],
+              "title": "Monitor Id"
+            },
+            "description": "Id the monitor was registered with."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No monitor with this id.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Monitor 'device-123' not found."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MonitorAck": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "examples": [
+              "device-123"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "id",
+          "status"
+        ],
+        "title": "MonitorAck",
+        "description": "Confirmation returned by the commands (register, heartbeat, pause)."
+      },
+      "MonitorCreate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "title": "Id",
+            "description": "Unique device id. 1 to 64 letters, digits, dots, dashes or underscores.",
+            "examples": [
+              "device-123"
+            ]
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Timeout",
+            "description": "Seconds the device may stay silent before an alert fires. Fractions are allowed. Maximum is 7 days.",
+            "examples": [
+              60
+            ],
+            "gt": 0,
+            "le": 604800
+          },
+          "alert_email": {
+            "type": "string",
+            "format": "email",
+            "title": "Alert Email",
+            "description": "Who to notify when the device stops sending heartbeats.",
+            "examples": [
+              "admin@critmon.com"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "timeout",
+          "alert_email"
+        ],
+        "title": "MonitorCreate",
+        "examples": [
+          {
+            "alert_email": "admin@critmon.com",
+            "id": "device-123",
+            "timeout": 60
+          }
+        ]
+      },
+      "MonitorOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Timeout",
+            "description": "Seconds allowed between heartbeats."
+          },
+          "alert_email": {
+            "type": "string",
+            "title": "Alert Email"
+          },
+          "seconds_remaining": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds Remaining",
+            "description": "Time left before the alert fires. Null when paused or down."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_heartbeat_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Heartbeat At",
+            "description": "Null until the first heartbeat is received."
+          },
+          "last_alert_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Alert At",
+            "description": "When the most recent alert fired. Null if it never has."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "timeout",
+          "alert_email",
+          "seconds_remaining",
+          "created_at",
+          "last_heartbeat_at",
+          "last_alert_at"
+        ],
+        "title": "MonitorOut",
+        "description": "Current state of a monitor.",
+        "examples": [
+          {
+            "alert_email": "admin@critmon.com",
+            "created_at": "2026-01-01T08:00:00+00:00",
+            "id": "device-123",
+            "last_heartbeat_at": "2026-01-01T08:00:19+00:00",
+            "seconds_remaining": 41.3,
+            "status": "active",
+            "timeout": 60
+          }
+        ]
+      },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "paused",
+          "down"
+        ],
+        "title": "Status"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ValidationErrorResponse": {
+        "properties": {
+          "detail": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ValidationErrorResponse"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Monitoring",
+      "description": "Register devices and keep their countdown alive."
+    },
+    {
+      "name": "Visibility",
+      "description": "See what state every device is in, and remove devices."
+    }
+  ]
+}

@@ -71,7 +71,7 @@ class MonitorOut(BaseModel):
 
     id: str
     status: Status
-    timeout: float = Field(description="Seconds allowed between heartbeats.")
+    timeout: int | float = Field(description="Seconds allowed between heartbeats.")
     alert_email: str
     seconds_remaining: float | None = Field(
         description="Time left before the alert fires. Null when paused or down."

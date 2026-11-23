@@ -19,14 +19,15 @@ MonitorId = Annotated[
 ]
 
 HEARTBEAT_MESSAGES = {
-    Status.ACTIVE: "Heartbeat received. Timer reset to {t} seconds.",
-    Status.PAUSED: "Heartbeat received. Monitor resumed, timer reset to {t} seconds.",
-    Status.DOWN: "Heartbeat received. Monitor recovered, timer reset to {t} seconds.",
+    Status.ACTIVE: "Heartbeat received. Timer reset to {t}.",
+    Status.PAUSED: "Heartbeat received. Monitor resumed, timer reset to {t}.",
+    Status.DOWN: "Heartbeat received. Monitor recovered, timer reset to {t}.",
 }
 
 
 def _seconds(value: float) -> str:
-    return f"{value:g}"  # 60 -> "60", 0.5 -> "0.5"
+    """60 -> '60 seconds', 1 -> '1 second', 0.5 -> '0.5 seconds'."""
+    return f"{value:g} second" + ("" if value == 1 else "s")
 
 
 def _error(status_code: int, message: str) -> JSONResponse:
@@ -41,7 +42,14 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
         yield
         service.shutdown()
 
-    app = FastAPI(title="Pulse-Check API", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(
+        title="Pulse-Check API",
+        summary="Get alerted when a device stops talking.",
+        description=docs.API_DESCRIPTION,
+        version="1.0.0",
+        openapi_tags=docs.TAGS,
+        lifespan=lifespan,
+    )
     app.state.service = service
 
     @app.exception_handler(MonitorNotFound)
@@ -58,6 +66,7 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
     @app.post(
         "/monitors",
         status_code=201,
+        tags=["Monitoring"],
         summary="Register a monitor",
         description=(
             "Creates a monitor and starts its countdown. If no heartbeat arrives "
@@ -70,7 +79,7 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
         return MonitorAck(
             message=(
                 f"Monitor '{monitor.id}' created. An alert fires if no heartbeat "
-                f"arrives within {_seconds(monitor.timeout)} seconds."
+                f"arrives within {_seconds(monitor.timeout)}."
             ),
             id=monitor.id,
             status=monitor.status,
@@ -78,6 +87,7 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
 
     @app.post(
         "/monitors/{monitor_id}/heartbeat",
+        tags=["Monitoring"],
         summary="Send a heartbeat",
         description=(
             "Resets the countdown to the full timeout. Also resumes a paused "
@@ -96,6 +106,7 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
 
     @app.post(
         "/monitors/{monitor_id}/pause",
+        tags=["Monitoring"],
         summary="Pause a monitor",
         description=(
             "Stops the countdown so no alert fires, for example while a device is "
@@ -121,6 +132,7 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
 
     @app.get(
         "/monitors",
+        tags=["Visibility"],
         summary="List monitors",
         description=(
             "Returns every monitor. Use `?status=down` to see only the devices "
@@ -136,6 +148,7 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
 
     @app.get(
         "/monitors/{monitor_id}",
+        tags=["Visibility"],
         summary="Get a monitor",
         description="Current status, time left on the countdown and last activity.",
         responses=docs.GET_RESPONSES,
@@ -146,6 +159,7 @@ def create_app(*, on_alert: Callable[[Monitor], None] = log_alert) -> FastAPI:
     @app.delete(
         "/monitors/{monitor_id}",
         status_code=204,
+        tags=["Visibility"],
         summary="Delete a monitor",
         description=(
             "Stops monitoring and forgets the device, for example when it is "
